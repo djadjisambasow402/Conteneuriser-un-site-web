@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+    environment {
+        DOCKERHUB_USERNAME = "domoda" 
+        APP_NAME = "devopsgcp"
+        IMAGE_TAG = "v1.0.${BUILD_NUMBER}"
+        IMAGE_NAME = "${DOCKERHUB_USERNAME}/${APP_NAME}"
+        DEPLOYMENT_FILE = "deploiement.yaml"
+        DEPLOYMENT_FOLDER= "/var/lib/jenkins/workspace/GitOps"
+    }
+
+    stages {
+
+        stage('echo toto') {
+            steps {
+                echo 'test webhook'
+            }
+        }
+        
+        stage('BUILD and run ') {
+            steps {
+                script {
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} application/."
+                }
+            }
+        }
+
+        stage('Push sur dockerhub') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-dss', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                        sh "docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD"
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+     // CD Pipline       
+        stage('Checkout Code') {
+            steps {
+                dir("${DEPLOYMENT_FOLDER}"){
+                git branch: 'main', credentialsId: 'gitops-repo', url: 'http://gitlab-it.gainde2000.sn/dssow/gitops.git'
+                }
+            }
+        }
+        stage('Update Deployment File') {
+            steps {
+                script {
+                    dir("${DEPLOYMENT_FOLDER}/argo-gitops"){
+                    withCredentials([usernamePassword(credentialsId: 'gitops-repo', passwordVariable: 'pass', usernameVariable: 'user')]) {
+                        sh "cat ${DEPLOYMENT_FILE}"
+                        sh "sed -i 's/${APP_NAME}.*/${APP_NAME}:${IMAGE_TAG}/g' ${DEPLOYMENT_FILE}"
+                        sh "cat ${DEPLOYMENT_FILE}"
+                        sh "git add ${DEPLOYMENT_FILE}"
+                        sh "git commit -m 'Updated the deployment file' "
+                        sh "git push http://$user:$pass@gitlab-it.gainde2000.sn/dssow/gitops.git HEAD:main"
+                    }
+                    }
+                }
+            }
+
+    }
+}
+}
+
